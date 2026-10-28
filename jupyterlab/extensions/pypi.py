@@ -332,21 +332,23 @@ class PyPIExtensionManager(ExtensionManager):
         try:
             data = await current_loop.run_in_executor(None, fn, *args)
         except xmlrpc.client.Fault as err:
-            if err.faultCode == -32500 and err.faultString.startswith(  # noqa PLR2004
-                "HTTPTooManyRequests:"
+            if not (
+                err.faultCode == -32500  # noqa PLR2004
+                and err.faultString.startswith("HTTPTooManyRequests:")
             ):
-                delay = 1.01
-                match = re.search(r"Limit may reset in (\d+) seconds.", err.faultString)
-                if match is not None:
-                    delay = int(match.group(1) or "1")
-                self.log.info(
-                    f"HTTPTooManyRequests - Perform next call to PyPI XMLRPC API in {delay}s."
-                )
-                await asyncio.sleep(delay * self.rpc_request_throttling + 0.01)
-                if recursive:
-                    data = await self.__throttleRequest(False, fn, *args)
-                else:
-                    data = await current_loop.run_in_executor(None, fn, *args)
+                raise
+            delay = 1.01
+            match = re.search(r"Limit may reset in (\d+) seconds.", err.faultString)
+            if match is not None:
+                delay = int(match.group(1) or "1")
+            self.log.info(
+                f"HTTPTooManyRequests - Perform next call to PyPI XMLRPC API in {delay}s."
+            )
+            await asyncio.sleep(delay * self.rpc_request_throttling + 0.01)
+            if recursive:
+                data = await self.__throttleRequest(False, fn, *args)
+            else:
+                data = await current_loop.run_in_executor(None, fn, *args)
 
         return data
 
