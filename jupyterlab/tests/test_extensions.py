@@ -5,6 +5,7 @@ import io
 import json
 import sys
 import tarfile
+import xmlrpc.client
 from subprocess import CompletedProcess
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -772,3 +773,24 @@ async def test_handler_blocks_uninstall_when_name_is_not_allowed():
     assert "was blocked" in exc_info.value.log_message
     handler.manager.is_uninstall_allowed.assert_awaited_once_with("-r/tmp/requirements.txt")
     handler.manager.uninstall.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "fault_code,fault_string",
+    [
+        (
+            -32500,
+            "RuntimeError: PyPI no longer supports the XMLRPC browse method. Use BigQuery instead.",
+        ),
+        (-32600, "Server error: generic failure"),
+    ],
+)
+async def test_pypi_throttle_request_reraises_unhandled_fault(fault_code, fault_string):
+    fault = xmlrpc.client.Fault(fault_code, fault_string)
+    manager = PyPIExtensionManager()
+    with patch("jupyterlab.extensions.pypi.tornado.ioloop.IOLoop.current") as current_loop:
+        current_loop.return_value.run_in_executor = AsyncMock(side_effect=fault)
+        with pytest.raises(xmlrpc.client.Fault) as exc_info:
+            await manager._PyPIExtensionManager__throttleRequest(False, lambda: None)
+        assert exc_info.value.faultCode == fault.faultCode
+        assert exc_info.value.faultString == fault.faultString
